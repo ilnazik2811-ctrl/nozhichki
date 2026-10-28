@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Ножички во дворе</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rubik+Mono+One&family=PT+Sans:wght@400;700&display=swap">
+<style>
+/* Layout: одна колонка-«экран телефона»: шапка, счёт земли, поле-канвас, подсказка, большая кнопка броска */
+:root{
+  --bg:#1c1a21; --panel:#27242d; --chalk:#efe6d2; --muted:#a59d8f;
+  --me:#4a7fe0; --foe:#d2493b; --gold:#e9b949; --ok:#62c06c;
+  --f-display:"Rubik Mono One","Arial Black",Impact,sans-serif;
+  --f-body:"PT Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  color-scheme:dark;
+}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--chalk);font-family:var(--f-body);font-size:16px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  padding-block:max(14px,env(safe-area-inset-top,0px)) max(14px,env(safe-area-inset-bottom,0px));box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+.wrap{max-width:500px;margin:0 auto;display:flex;flex-direction:column;gap:12px}
+header{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+h1{font-family:var(--f-display);font-weight:400;font-size:1.35rem;letter-spacing:.02em;margin:0;text-wrap:balance}
+.stat{font-size:.85rem;color:var(--muted);font-variant-numeric:tabular-nums}
+.stat b{color:var(--gold);font-weight:700}
+.land{display:flex;flex-direction:column;gap:6px}
+.land-names{display:flex;justify-content:space-between;font-size:.8rem;text-transform:uppercase;letter-spacing:.08em;font-weight:700}
+.land-names .me{color:var(--me)} .land-names .foe{color:var(--foe)}
+.land-names span{font-variant-numeric:tabular-nums}
+.bar{height:10px;border-radius:5px;background:var(--foe);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--me);transition:width .4s ease}
+.stage{position:relative;width:100%;aspect-ratio:1;max-width:100%;border-radius:14px;overflow:hidden;
+  touch-action:manipulation;user-select:none;-webkit-user-select:none;cursor:pointer;background:#5a3d24}
+canvas{display:block;width:100%;height:100%}
+.msg{min-height:2.8em;margin:0;line-height:1.4;font-size:.98rem}
+.btn{font-family:var(--f-display);font-size:1.05rem;letter-spacing:.04em;border:0;border-radius:12px;
+  padding:16px 18px;background:var(--gold);color:#241a08;cursor:pointer;width:100%}
+.btn:disabled{background:var(--panel);color:var(--muted);cursor:default}
+.btn:focus-visible{outline:3px solid var(--chalk);outline-offset:3px}
+.btn:active:not(:disabled){transform:translateY(1px)}
+.overlay{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;gap:14px;
+  padding:22px;background:rgba(24,22,28,.9);cursor:default}
+.overlay h2{font-family:var(--f-display);font-weight:400;font-size:1.25rem;margin:0;text-wrap:balance}
+.overlay ol{margin:0;padding-left:1.2em;display:flex;flex-direction:column;gap:6px;font-size:.92rem;line-height:1.35;max-width:60ch}
+.overlay p{margin:0;font-size:.95rem;line-height:1.4;color:var(--muted)}
+.overlay .btn{width:auto;align-self:flex-start}
+.foot{font-size:.8rem;color:var(--muted);line-height:1.4;margin:0}
+@media (max-width:380px){.overlay ol{font-size:.84rem;gap:4px}.overlay{gap:10px;padding:16px}}
+</style>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script>
+(function(){
+  try{
+    var tg=window.Telegram&&window.Telegram.WebApp;
+    if(!tg)return;
+    tg.ready();          // говорим Telegram, что игра загрузилась
+    tg.expand();         // открываем на весь экран
+    if(tg.disableVerticalSwipes)tg.disableVerticalSwipes(); // свайп вниз не закрывает игру
+    if(tg.setHeaderColor)tg.setHeaderColor('#1c1a21');
+    if(tg.setBackgroundColor)tg.setBackgroundColor('#1c1a21');
+  }catch(e){}
+})();
+</script>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <h1>Ножички</h1>
+    <div class="stat">Ловкость: <b id="dex">0</b> · Серия: <b id="streak">0</b></div>
+  </header>
+
+  <div class="land" aria-live="polite">
+    <div class="land-names"><span class="me">Ты · <span id="pMe">50</span>%</span><span class="foe">Серый · <span id="pFoe">50</span>%</span></div>
+    <div class="bar"><i id="barMe" style="width:50%"></i></div>
+  </div>
+
+  <div class="stage" id="stage">
+    <canvas id="cv"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">Ножички на земле</h2>
+      <ol id="ovRules">
+        <li>Круг — это земля. Синяя твоя, красная — Серого с третьего подъезда.</li>
+        <li>Первое нажатие: прицел гуляет по кругу, а нож поворачивается. Жми, когда прицел на земле Серого. Жёлтым видно, что отрежешь.</li>
+        <li>Второе нажатие: бросок. Лезвие должно смотреть вниз, в зелёную зону, тогда нож воткнётся.</li>
+        <li>Линию чертят по клинку до краёв участка. Меньший кусок забираешь ты, больший остаётся Серому. Воткнул — кидай ещё.</li>
+        <li>У кого осталось меньше 10% земли, тому негде стоять: проиграл.</li>
+      </ol>
+      <p id="ovText" hidden></p>
+      <button class="btn" id="ovBtn">Играть</button>
+    </div>
+  </div>
+
+  <p class="msg" id="msg">Нажми «Играть», чтобы начать.</p>
+  <button class="btn" id="act" disabled>Целиться</button>
+  <p class="foot">Можно жать на поле, на кнопку или на пробел. Ловкость копится между партиями: в большой игре это будет прокачка героя.</p>
+</div>
+
+<script>
+(function(){
+const $=id=>document.getElementById(id);
+const cv=$('cv'),ctx=cv.getContext('2d');
+const TOL=0.42, LOSE=0.10, FLY=620, TAU=Math.PI*2, DOWN=Math.PI/2;
+const N=140, CELLS=N*N;
+const own=new Uint8Array(CELLS), inC=new Uint8Array(CELLS), lineM=new Uint8Array(CELLS), label=new Int32Array(CELLS), stack=new Int32Array(CELLS);
+let total=0, W=400, DPR=1, noise=null, S=null, audio=null, dex=0;
+try{dex=parseInt(localStorage.getItem('nozhi_dex'),10)||0}catch(e){}
+$('dex').textContent=dex;
+
+const rand=(a,b)=>a+Math.random()*(b-a);
+function angDiff(a,b){let d=((a-b)%TAU+TAU)%TAU;if(d>Math.PI)d-=TAU;return d}
+function geo(){return{cx:W/2,cy:W*0.46,R:W*0.37,dx:W*0.86,dy:W*0.86,dr:W*0.095}}
+
+/* ---------- земля как сетка клеток ---------- */
+function cellOf(u,v){const i=Math.floor((u+1)/2*N),j=Math.floor((v+1)/2*N);return(i<0||j<0||i>=N||j>=N)?-1:j*N+i}
+function initGrid(){total=0;for(let j=0;j<N;j++)for(let i=0;i<N;i++){const u=(i+.5)/N*2-1,v=(j+.5)/N*2-1,k=j*N+i;
+  if(u*u+v*v<=1){own[k]=u<0?1:2;total++}else own[k]=0}}
+function count(who){let c=0;for(let k=0;k<CELLS;k++)if(own[k]===who)c++;return c}
+function flood(seed,ok,mark,val,out){let sp=0;stack[sp++]=seed;mark[seed]=val;
+  while(sp){const k=stack[--sp];if(out)out.push(k);const i=k%N;
+    const nb=[i>0?k-1:-1,i<N-1?k+1:-1,k-N,k+N];
+    for(const n of nb){if(n<0||n>=CELLS||mark[n]||!ok(n))continue;mark[n]=val;stack[sp++]=n}}}
+// Разрез: линия по клинку через точку, до краёв участка соперника. Меньшие куски — бросавшему.
+function computeCut(px,py,ang,victim){
+  const s=cellOf(px,py);if(s<0||own[s]!==victim)return null;
+  inC.fill(0);flood(s,n=>own[n]===victim,inC,1);
+  lineM.fill(0);const st=0.5/N,ca=Math.cos(ang),sa=Math.sin(ang),ends=[];
+  for(const d of [1,-1]){let t=0,lu=px,lv=py;
+    for(;;){const u=px+d*t*ca,v=py+d*t*sa,c=cellOf(u,v);if(c<0||!inC[c])break;lineM[c]=1;lu=u;lv=v;t+=st}
+    ends.push([lu,lv])}
+  label.fill(0);const pieces=[];let id=0;
+  for(let k=0;k<CELLS;k++){if(inC[k]&&!lineM[k]&&!label[k]){const arr=[];flood(k,n=>inC[n]&&!lineM[n],label,++id,arr);pieces.push(arr)}}
+  pieces.sort((a,b)=>b.length-a.length);
+  const taken=[];for(let p=1;p<pieces.length;p++)for(const k of pieces[p])taken.push(k);
+  return{seg:ends,taken,pct:taken.length/total};
+}
+
+/* ---------- картинки ---------- */
+const terr=document.createElement('canvas');terr.width=terr.height=N;const tctx=terr.getContext('2d');const timg=tctx.createImageData(N,N);
+const prev=document.createElement('canvas');prev.width=prev.height=N;const pctx=prev.getContext('2d');const pimg=pctx.createImageData(N,N);
+function paintTerr(){const d=timg.data;for(let k=0;k<CELLS;k++){const o=own[k],x=k*4;
+  if(o===1){d[x]=74;d[x+1]=127;d[x+2]=224;d[x+3]=95}else if(o===2){d[x]=210;d[x+1]=73;d[x+2]=59;d[x+3]=85}else d[x+3]=0}
+  tctx.putImageData(timg,0,0)}
+function paintPrev(cut){const d=pimg.data;d.fill(0);if(cut)for(const k of cut.taken){const x=k*4;d[x]=233;d[x+1]=185;d[x+2]=73;d[x+3]=150}
+  pctx.putImageData(pimg,0,0)}
+
+function resize(){const r=cv.getBoundingClientRect();W=r.width||400;DPR=Math.min(2,window.devicePixelRatio||1);
+  cv.width=Math.round(W*DPR);cv.height=Math.round(W*DPR);makeNoise()}
+function makeNoise(){noise=document.createElement('canvas');noise.width=cv.width;noise.height=cv.height;
+  const n=noise.getContext('2d');const g=n.createRadialGradient(cv.width/2,cv.height*0.45,cv.width*0.1,cv.width/2,cv.height/2,cv.width*0.75);
+  g.addColorStop(0,'#6e4c30');g.addColorStop(1,'#3f2a18');n.fillStyle=g;n.fillRect(0,0,noise.width,noise.height);
+  let s=7;const r=()=>(s=(s*16807)%2147483647)/2147483647;
+  for(let i=0;i<1500;i++){const x=r()*noise.width,y=r()*noise.height,rad=(r()*2.2+0.4)*DPR;
+    n.fillStyle=r()<0.55?'rgba(30,18,8,.35)':'rgba(170,135,95,.22)';n.beginPath();n.arc(x,y,rad,0,TAU);n.fill()}
+  for(let i=0;i<14;i++){const x=r()*noise.width,y=r()*noise.height,rad=(r()*4+3)*DPR;
+    n.fillStyle='rgba(150,140,125,.55)';n.beginPath();n.ellipse(x,y,rad,rad*0.7,r()*3,0,TAU);n.fill()}}
+
+function thunk(hard){try{if(!audio)audio=new (window.AudioContext||window.webkitAudioContext)();
+  const o=audio.createOscillator(),g=audio.createGain(),t=audio.currentTime;o.type='triangle';
+  o.frequency.setValueAtTime(hard?180:120,t);o.frequency.exponentialRampToValueAtTime(50,t+0.12);
+  g.gain.setValueAtTime(0.35,t);g.gain.exponentialRampToValueAtTime(0.001,t+0.15);
+  o.connect(g);g.connect(audio.destination);o.start(t);o.stop(t+0.16)}catch(e){}}
+
+/* ---------- ход игры ---------- */
+function msg(t){$('msg').textContent=t}
+function hud(){const me=Math.round(count(1)/total*100);
+  $('pMe').textContent=me;$('pFoe').textContent=100-me;$('barMe').style.width=me+'%';
+  $('dex').textContent=dex;$('streak').textContent=S.streak}
+function btn(){const b=$('act');
+  if(!S||S.over||S.turn!=='me'||(S.phase!=='aim'&&S.phase!=='spin')){b.disabled=true;b.textContent=S&&S.turn==='ai'?'Кидает Серый':'Жди';return}
+  b.disabled=false;b.textContent=S.phase==='aim'?'Целиться':'Кинуть!'}
+
+function newGame(){initGrid();paintTerr();paintPrev(null);
+  S={turn:'me',phase:'aim',t0:0,segs:[{a:[0,-1],b:[0,1]}],marks:[],streak:0,over:false};
+  $('ov').hidden=true;setTurn('me',performance.now());hud()}
+function setTurn(who,now){S.turn=who;S.phase='aim';S.t0=now;S.lock=null;S.cut=null;
+  S.marks=S.marks.filter(m=>!m.flat);
+  S.p1=rand(0,TAU);S.p2=rand(0,TAU);S.p3=rand(0,Math.PI);
+  if(who==='ai'){planAI(now);msg('Серый выбирает, куда кинуть…')}
+  else msg('Твой бросок. Жми, когда прицел на красной земле. Жёлтым видно, что отрежешь.');
+  btn()}
+function aimPos(now){
+  if(S.turn==='ai'){const t=Math.min(1,(now-S.t0)/S.aiDur),e=t*t*(3-2*t);
+    return{u:S.aiFrom.u+(S.aiTo.u-S.aiFrom.u)*e,v:S.aiFrom.v+(S.aiTo.v-S.aiFrom.v)*e,a:S.aiFrom.a+angDiff(S.aiTo.a,S.aiFrom.a)*e}}
+  const t=(now-S.t0)/1000;let u=0.9*Math.sin(t*2.3+S.p1),v=0.9*Math.sin(t*3.26+S.p2);
+  const r=Math.hypot(u,v);if(r>0.93){u*=0.93/r;v*=0.93/r}
+  return{u,v,a:S.p3+t*2}}
+function planAI(now){
+  const c=[];for(let n=0;n<60&&c.length<36;n++){const u=rand(-1,1),v=rand(-1,1);if(u*u+v*v>0.9)continue;
+    const a=rand(0,Math.PI),cut=computeCut(u,v,a,1);if(cut)c.push({u,v,a,p:cut.pct})}
+  c.sort((x,y)=>y.p-x.p);const pick=c.length?c[Math.floor(Math.random()*Math.min(6,c.length))]:{u:-0.5,v:0,a:0.5};
+  S.aiFrom={u:rand(-0.3,0.3),v:rand(-0.3,0.3),a:rand(0,Math.PI)};S.aiTo=pick;S.aiDur=rand(1000,1600)}
+function lock(now){const p=aimPos(now);S.lock=p;S.cut=computeCut(p.u,p.v,p.a,S.turn==='me'?2:1);paintPrev(S.cut);
+  S.phase='spin';S.t0=now;S.spinSpeed=5.6;S.spinOff=Math.random()*TAU;
+  if(S.turn==='ai'){S.aiStopAt=now+rand(700,1400);msg('Серый прицелился…')}
+  else msg(S.cut?'Нож крутится. Жми, когда лезвие смотрит вниз, в зелёную зону.':'Прицел не на земле Серого, но кинуть всё равно придётся. Жми!');
+  btn()}
+function spinAngle(now){return S.spinOff+(now-S.t0)/1000*S.spinSpeed}
+function release(now,forced){const a=forced!==undefined?forced:spinAngle(now);
+  S.relAngle=a;S.stick=Math.abs(angDiff(a,DOWN))<TOL;S.phase='fly';S.t0=now;btn()}
+function land(now){
+  const who=S.turn,other=who==='me'?'ai':'me',L=S.lock;let ok=false,t;
+  paintPrev(null);
+  if(!S.cut){t=who==='me'?'Попал в свою землю. Так не считается, ход Серого.':'Серый промазал мимо твоей земли. Твой ход!';
+    S.marks.push({u:L.u,v:L.v,a:L.a,flat:true})}
+  else if(!S.stick){t=who==='me'?'Нож шлёпнулся плашмя, не воткнулся. Ход Серого.':'У Серого не воткнулся. Твой ход!';
+    S.marks.push({u:L.u,v:L.v,a:L.a,flat:true});thunk(false)}
+  else{ok=true;const me=who==='me'?1:2;for(const k of S.cut.taken)own[k]=me;paintTerr();
+    S.segs.push({a:S.cut.seg[0],b:S.cut.seg[1]});S.marks.push({u:L.u,v:L.v,a:L.a,flat:false});thunk(true);
+    const pc=Math.round(S.cut.pct*100);
+    if(who==='me'){dex++;S.streak++;try{localStorage.setItem('nozhi_dex',String(dex))}catch(e){}
+      t=pc>0?'Воткнул! Прочертил по клинку и отрезал '+pc+'% земли. Ловкость +1, кидай ещё!':'Воткнул, но линия отрезала только крошку. Ловкость +1, кидай ещё!'}
+    else t='Серый воткнул и отрезал у тебя '+pc+'%. Он кидает снова.'}
+  if(!ok&&who==='me')S.streak=0;
+  S.next=ok?who:other;S.phase='result';S.t0=now;
+  const mine=count(1)/total;
+  if(1-mine<LOSE){S.over='win';t='Земля твоя! Серому негде поставить ногу.'}
+  else if(mine<LOSE){S.over='lose';t='Серый забрал почти всю землю. Отыграешься?'}
+  msg(t);hud();btn()}
+function showEnd(){
+  $('ovTitle').textContent=S.over==='win'?'Победа во дворе':'Серый сегодня сильнее';
+  $('ovRules').hidden=true;$('ovText').hidden=false;
+  $('ovText').textContent=S.over==='win'?'Ты отрезал всю землю. Ловкость за всё время: '+dex+'. Серый уже зовёт на реванш.'
+    :'Не беда, все с этого начинали. Ловкость за всё время: '+dex+'.';
+  $('ovBtn').textContent='Ещё партию';$('ov').hidden=false}
+function act(){if(!S||S.over||S.turn!=='me'||!$('ov').hidden)return;const now=performance.now();
+  if(S.phase==='aim')lock(now);else if(S.phase==='spin')release(now)}
+
+/* ---------- рисование ---------- */
+function knife(x,y,a,s,alpha){ctx.save();ctx.translate(x,y);ctx.rotate(a);ctx.globalAlpha=alpha===undefined?1:alpha;
+  ctx.fillStyle='#3a2416';ctx.beginPath();ctx.roundRect?ctx.roundRect(-0.62*s,-0.1*s,0.6*s,0.2*s,0.08*s):ctx.rect(-0.62*s,-0.1*s,0.6*s,0.2*s);ctx.fill();
+  ctx.fillStyle='#6b4a32';ctx.fillRect(-0.55*s,-0.03*s,0.45*s,0.06*s);
+  ctx.fillStyle='#8f897d';ctx.fillRect(-0.04*s,-0.14*s,0.07*s,0.28*s);
+  ctx.fillStyle='#dfe3e6';ctx.beginPath();ctx.moveTo(0.03*s,-0.085*s);ctx.lineTo(0.78*s,-0.085*s);ctx.lineTo(1*s,0);ctx.lineTo(0.03*s,0.085*s);ctx.closePath();ctx.fill();
+  ctx.strokeStyle='#9aa1a6';ctx.lineWidth=Math.max(1,0.02*s);ctx.beginPath();ctx.moveTo(0.05*s,0.02*s);ctx.lineTo(0.85*s,0.02*s);ctx.stroke();
+  ctx.restore()}
+function stuckKnife(px,py,a){ // нож воткнут: виден сверху вдоль линии клинка
+  ctx.strokeStyle='rgba(20,12,5,.7)';ctx.lineWidth=3;ctx.beginPath();
+  ctx.moveTo(px-Math.cos(a)*W*0.018,py-Math.sin(a)*W*0.018);ctx.lineTo(px+Math.cos(a)*W*0.018,py+Math.sin(a)*W*0.018);ctx.stroke();
+  knife(px-Math.cos(a)*W*0.045,py-Math.sin(a)*W*0.045,a,W*0.05,1)}
+function draw(now){
+  const{cx,cy,R}=geo();ctx.setTransform(DPR,0,0,DPR,0,0);ctx.clearRect(0,0,W,W);
+  if(noise)ctx.drawImage(noise,0,0,W,W);
+  const X=u=>cx+u*R,Y=v=>cy+v*R;
+  ctx.save();ctx.beginPath();ctx.arc(cx,cy,R,0,TAU);ctx.clip();ctx.imageSmoothingEnabled=true;
+  ctx.drawImage(terr,cx-R,cy-R,2*R,2*R);
+  let live=null;
+  if(S&&S.phase==='aim'){const p=aimPos(now);live=computeCut(p.u,p.v,p.a,S.turn==='me'?2:1);paintPrev(live)}
+  if(S&&(S.phase==='aim'||S.phase==='spin'||S.phase==='fly'))ctx.drawImage(prev,cx-R,cy-R,2*R,2*R);
+  if(S){S.segs.forEach((s,i)=>{const last=i===S.segs.length-1;
+    ctx.strokeStyle=last?'rgba(239,230,210,.95)':'rgba(239,230,210,.4)';ctx.lineWidth=last?3:2;
+    ctx.beginPath();ctx.moveTo(X(s.a[0]),Y(s.a[1]));ctx.lineTo(X(s.b[0]),Y(s.b[1]));ctx.stroke()})}
+  ctx.restore();
+  ctx.strokeStyle='rgba(239,230,210,.85)';ctx.lineWidth=3;ctx.beginPath();ctx.arc(cx,cy,R,0,TAU);ctx.stroke();
+  ctx.strokeStyle='rgba(239,230,210,.3)';ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(cx+1.5,cy-1,R+2,0,TAU);ctx.stroke();
+  if(!S)return drawDial(-Math.PI/2);
+
+  S.marks.forEach(m=>{const px=X(m.u),py=Y(m.v);if(m.flat)knife(px,py,m.a+0.6,W*0.07,0.75);else stuckKnife(px,py,m.a)});
+
+  // прицел и будущая линия по клинку
+  let P=null,cut=null;
+  if(S.phase==='aim'){P=aimPos(now);cut=live}else if(S.phase==='spin'||S.phase==='fly'){P=S.lock;cut=S.cut}
+  if(P){const px=X(P.u),py=Y(P.v),col=S.turn==='me'?'#e9b949':'#ff7a6b';
+    ctx.save();ctx.beginPath();ctx.arc(cx,cy,R,0,TAU);ctx.clip();
+    if(cut){ctx.strokeStyle=col;ctx.lineWidth=2.5;ctx.setLineDash([7,5]);ctx.beginPath();
+      ctx.moveTo(X(cut.seg[0][0]),Y(cut.seg[0][1]));ctx.lineTo(X(cut.seg[1][0]),Y(cut.seg[1][1]));ctx.stroke();ctx.setLineDash([])}
+    ctx.restore();
+    if(S.phase!=='fly')knife(px-Math.cos(P.a)*W*0.05,py-Math.sin(P.a)*W*0.05,P.a,W*0.075,cut?0.95:0.45);
+    ctx.strokeStyle=cut?col:'rgba(239,230,210,.6)';ctx.lineWidth=2.5;ctx.beginPath();ctx.arc(px,py,W*0.022,0,TAU);ctx.stroke();
+    if(cut&&cut.pct>0){ctx.font='700 '+Math.round(W*0.038)+'px "PT Sans", system-ui, sans-serif';ctx.textAlign='left';ctx.textBaseline='bottom';
+      ctx.fillStyle='rgba(20,12,5,.7)';ctx.fillText('+'+Math.max(1,Math.round(cut.pct*100))+'%',px+W*0.03+1,py-W*0.02+1);
+      ctx.fillStyle=col;ctx.fillText('+'+Math.max(1,Math.round(cut.pct*100))+'%',px+W*0.03,py-W*0.02)}}
+
+  if(S.phase==='fly'){const t=Math.min(1,(now-S.t0)/FLY),me=S.turn==='me';
+    const ox=me?W*0.08:W*0.92,oy=me?W*1.03:-W*0.03,tx=X(S.lock.u),ty=Y(S.lock.v);
+    const px=ox+(tx-ox)*t,py=oy+(ty-oy)*t-Math.sin(Math.PI*t)*W*0.12,s=W*0.07*(1+0.7*Math.sin(Math.PI*t));
+    ctx.fillStyle='rgba(20,12,5,.3)';ctx.beginPath();ctx.ellipse(ox+(tx-ox)*t,oy+(ty-oy)*t,s*0.5,s*0.15,0,0,TAU);ctx.fill();
+    knife(px,py,S.relAngle-(1-t)*Math.PI*4,s,1)}
+  let ang=-Math.PI/2;if(S.phase==='spin')ang=spinAngle(now);else if(S.phase==='fly'||S.phase==='result')ang=S.relAngle;
+  drawDial(ang)}
+function drawDial(ang){const{dx,dy,dr}=geo();
+  ctx.fillStyle='rgba(24,22,28,.82)';ctx.beginPath();ctx.arc(dx,dy,dr*1.15,0,TAU);ctx.fill();
+  ctx.strokeStyle='rgba(239,230,210,.35)';ctx.lineWidth=1.5;ctx.stroke();
+  ctx.strokeStyle='#62c06c';ctx.lineWidth=dr*0.22;ctx.beginPath();ctx.arc(dx,dy,dr*0.92,DOWN-TOL,DOWN+TOL);ctx.stroke();
+  const s=dr*0.95;knife(dx-Math.cos(ang)*s*0.2,dy-Math.sin(ang)*s*0.2,ang,s,1);
+  ctx.font='700 '+Math.round(W*0.026)+'px "PT Sans", system-ui, sans-serif';ctx.fillStyle='rgba(239,230,210,.75)';
+  ctx.textAlign='center';ctx.textBaseline='bottom';ctx.fillText('бросок',dx,dy-dr*1.2)}
+
+function frame(now){
+  if(S&&(!S.over||S.phase==='result')){
+    if(S.turn==='ai'){
+      if(S.phase==='aim'&&now-S.t0>=S.aiDur+250)lock(now);
+      else if(S.phase==='spin'&&now>=S.aiStopAt){const ok=Math.random()<0.62;
+        release(now,ok?DOWN+rand(-0.3,0.3):DOWN+(Math.random()<0.5?1:-1)*rand(0.8,2.6))}}
+    if(S.phase==='fly'&&now-S.t0>=FLY)land(now);
+    else if(S.phase==='result'&&now-S.t0>=1300){if(S.over){S.phase='done';showEnd()}else setTurn(S.next,now)}}
+  draw(now);requestAnimationFrame(frame)}
+
+$('stage').addEventListener('pointerdown',e=>{if(e.target.closest('.overlay'))return;e.preventDefault();act()});
+$('act').addEventListener('click',act);
+document.addEventListener('keydown',e=>{if(e.code==='Space'&&$('ov').hidden){e.preventDefault();act()}});
+$('ovBtn').addEventListener('click',()=>{thunk(false);newGame()});
+window.addEventListener('resize',resize);
+initGrid();paintTerr();resize();requestAnimationFrame(frame);
+})();
+</script>
+
+</body>
+</html>
